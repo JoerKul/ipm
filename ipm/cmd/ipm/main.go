@@ -15,8 +15,6 @@ var (
 	registryURL string
 	logLevel    string
 	logFile     string
-	keyFile     string
-	pubKeyFile  string
 )
 
 var rootCmd = &cobra.Command{Use: "ipm"}
@@ -30,7 +28,7 @@ var installCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
 		}
-		reg := registry.NewNPMRegistry(registryURL, "") // Korrekt: NewNPMRegistry
+		reg := registry.NewNPMRegistry(registryURL, "")
 		inst := installer.NewInstaller(reg)
 		if err := inst.Install(reg, args[0], false); err != nil {
 			log.Error("Installation failed", err)
@@ -79,6 +77,7 @@ var signCmd = &cobra.Command{
 	Short: "Sign a package file",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		keyFile, _ := cmd.Flags().GetString("key") // Lokales Flag
 		if err := log.Init(logLevel, logFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
@@ -96,6 +95,7 @@ var verifyCmd = &cobra.Command{
 	Short: "Verify a package file",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		pubKeyFile, _ := cmd.Flags().GetString("pubkey") // Lokales Flag
 		if err := log.Init(logLevel, logFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
@@ -110,10 +110,12 @@ var verifyCmd = &cobra.Command{
 
 func main() {
 	rootCmd.PersistentFlags().StringVar(&registryURL, "registry", "https://registry.npmjs.org", "Registry URL")
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, error)")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level (debug, info, error)") // Default auf "" geändert
 	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Log file path")
-	rootCmd.PersistentFlags().StringVar(&keyFile, "key", "", "Private key file for signing")
-	rootCmd.PersistentFlags().StringVar(&pubKeyFile, "pubkey", "", "Public key file for verification")
+
+	// Kommando-spezifische Flags
+	signCmd.Flags().String("key", "", "Private key file for signing")
+	verifyCmd.Flags().String("pubkey", "", "Public key file for verification")
 
 	rootCmd.AddCommand(installCmd, initCmd, packCmd, signCmd, verifyCmd)
 	if err := rootCmd.Execute(); err != nil {
