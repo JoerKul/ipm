@@ -24,16 +24,24 @@ var installCmd = &cobra.Command{
 	Short: "Install a package",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		pubKeyFile, _ := cmd.Flags().GetString("pubkey") // Lokales Flag
 		if err := log.Init(logLevel, logFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
 		}
+		log.Debug("Starting installation process", map[string]interface{}{
+			"package": args[0],
+			"pubkey":  pubKeyFile,
+		})
 		reg := registry.NewNPMRegistry(registryURL, "")
 		inst := installer.NewInstaller(reg)
-		if err := inst.Install(reg, args[0], false); err != nil {
+		if err := inst.Install(reg, args[0], false, pubKeyFile); err != nil {
 			log.Error("Installation failed", err)
 			os.Exit(1)
 		}
+		log.Info("Installation completed", map[string]interface{}{
+			"package": args[0],
+		})
 	},
 }
 
@@ -77,7 +85,7 @@ var signCmd = &cobra.Command{
 	Short: "Sign a package file",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		keyFile, _ := cmd.Flags().GetString("key") // Lokales Flag
+		keyFile, _ := cmd.Flags().GetString("key")
 		if err := log.Init(logLevel, logFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
@@ -102,7 +110,7 @@ var verifyCmd = &cobra.Command{
 	Short: "Verify a package file",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		pubKeyFile, _ := cmd.Flags().GetString("pubkey") // Lokales Flag
+		pubKeyFile, _ := cmd.Flags().GetString("pubkey")
 		if err := log.Init(logLevel, logFile); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
@@ -112,7 +120,7 @@ var verifyCmd = &cobra.Command{
 			"pubkey": pubKeyFile,
 		})
 		if err := verifyPackage(args[0], pubKeyFile); err != nil {
-			fmt.Printf("Package verification failed: %v\n", err) // Direkte Ausgabe für Anwender
+			fmt.Printf("Package verification failed: %v\n", err)
 			log.Error("Failed to verify package", err)
 			os.Exit(1)
 		}
@@ -129,6 +137,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Log file path")
 
 	// Kommando-spezifische Flags
+	installCmd.Flags().String("pubkey", "", "Public key file for signature verification")
 	signCmd.Flags().String("key", "", "Private key file for signing")
 	verifyCmd.Flags().String("pubkey", "", "Public key file for verification")
 
