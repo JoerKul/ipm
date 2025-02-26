@@ -82,10 +82,17 @@ var signCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
 		}
+		log.Debug("Starting signing process", map[string]interface{}{
+			"file": args[0],
+			"key":  keyFile,
+		})
 		if err := signPackage(args[0], keyFile); err != nil {
 			log.Error("Failed to sign package", err)
 			os.Exit(1)
 		}
+		log.Info("Package signed successfully", map[string]interface{}{
+			"file": args[0],
+		})
 		fmt.Printf("Signed package %s\n", args[0])
 	},
 }
@@ -100,17 +107,24 @@ var verifyCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
 		}
+		log.Debug("Starting verification process", map[string]interface{}{
+			"file":   args[0],
+			"pubkey": pubKeyFile,
+		})
 		if err := verifyPackage(args[0], pubKeyFile); err != nil {
 			log.Error("Failed to verify package", err)
 			os.Exit(1)
 		}
+		log.Info("Package verified successfully", map[string]interface{}{
+			"file": args[0],
+		})
 		fmt.Printf("Verified package %s\n", args[0])
 	},
 }
 
 func main() {
 	rootCmd.PersistentFlags().StringVar(&registryURL, "registry", "https://registry.npmjs.org", "Registry URL")
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level (debug, info, error)") // Default auf "" geändert
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level (debug, info, error)")
 	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Log file path")
 
 	// Kommando-spezifische Flags

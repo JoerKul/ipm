@@ -88,31 +88,94 @@ func signPackage(file, keyFile string) error {
 		return fmt.Errorf("invalid private key format")
 	}
 
-	// Verwende ParsePKCS8PrivateKey statt ParsePKCS1PrivateKey
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return fmt.Errorf("failed to parse private key: %v", err)
 	}
 
-	// Typumwandlung zu *rsa.PrivateKey
 	privateKey, ok := key.(*rsa.PrivateKey)
 	if !ok {
 		return fmt.Errorf("private key is not an RSA key")
 	}
 
+	// Original-Tarball ohne Signatur laden
 	tarball, err := os.ReadFile(file)
 	if err != nil {
 		return fmt.Errorf("failed to read package file: %v", err)
 	}
 
+	// Signatur erstellen
 	hash := sha256.Sum256(tarball)
 	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, hash[:])
 	if err != nil {
 		return fmt.Errorf("failed to sign package: %v", err)
 	}
 
-	sigFile := file + ".sig"
-	return os.WriteFile(sigFile, signature, 0644)
+	// Temporäre Datei für neue .tgz mit Signatur
+	tempFile, err := os.CreateTemp("", "signed-*.tgz")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name()) // Wird später überschrieben
+
+	gw := gzip.NewWriter(tempFile)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	// Original-Tarball entpacken und kopieren
+	f, err := os.Open(file)
+	if err != nil {
+		return fmt.Errorf("failed to open tarball: %v", err)
+	}
+	defer f.Close()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("failed to read gzip: %v", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tarball: %v", err)
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("failed to write header: %v", err)
+		}
+		_, err = io.Copy(tw, tr)
+		if err != nil {
+			return fmt.Errorf("failed to copy file: %v", err)
+		}
+	}
+
+	// Signatur als signature.sig hinzufügen
+	sigHeader := &tar.Header{
+		Name: "signature.sig",
+		Mode: 0644,
+		Size: int64(len(signature)),
+	}
+	if err := tw.WriteHeader(sigHeader); err != nil {
+		return fmt.Errorf("failed to write signature header: %v", err)
+	}
+	if _, err := tw.Write(signature); err != nil {
+		return fmt.Errorf("failed to write signature: %v", err)
+	}
+
+	// Tarball abschließen und umbenennen
+	tw.Close()
+	gw.Close()
+	tempFile.Close()
+	if err := os.Rename(tempFile.Name(), file); err != nil {
+		return fmt.Errorf("failed to replace original tarball: %v", err)
+	}
+
+	return nil
 }
 
 func verifyPackage(file, pubKeyFile string) error {
@@ -129,42 +192,92 @@ func verifyPackage(file, pubKeyFile string) error {
 		return fmt.Errorf("invalid public key format")
 	}
 
-	// Verwende ParsePKIXPublicKey statt ParsePKCS1PublicKey
 	pubKey, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		return fmt.Errorf("failed to parse public key: %v", err)
 	}
 
-	// Typumwandlung zu *rsa.PublicKey
 	publicKey, ok := pubKey.(*rsa.PublicKey)
 	if !ok {
 		return fmt.Errorf("public key is not an RSA key")
 	}
 
-	tarball, err := os.ReadFile(file)
+	// Tarball öffnen
+	f, err := os.Open(file)
 	if err != nil {
-		return fmt.Errorf("failed to read package file: %v", err)
+		return fmt.Errorf("failed to open package file: %v", err)
+	}
+	defer f.Close()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("failed to read gzip: %v", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	var signature []byte
+	var tarballData []byte
+
+	// Tarball ohne Signatur rekonstruieren und Signatur extrahieren
+	tempFile, err := os.CreateTemp("", "unsigned-*.tgz")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	gw := gzip.NewWriter(tempFile)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tarball: %v", err)
+		}
+		if hdr.Name == "signature.sig" {
+			signature, err = io.ReadAll(tr)
+			if err != nil {
+				return fmt.Errorf("failed to read signature: %v", err)
+			}
+			continue
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("failed to write header: %v", err)
+		}
+		_, err = io.Copy(tw, tr)
+		if err != nil {
+			return fmt.Errorf("failed to copy file: %v", err)
+		}
 	}
 
-	sigFile := file + ".sig"
-	signature, err := os.ReadFile(sigFile)
-	if os.IsNotExist(err) {
+	tw.Close()
+	gw.Close()
+	tempFile.Close()
+
+	if signature == nil {
 		log.Warn("Package is not signed", map[string]interface{}{
 			"file": file,
 		})
 		return nil
-	} else if err != nil {
-		return fmt.Errorf("failed to read signature file: %v", err)
 	}
 
-	hash := sha256.Sum256(tarball)
+	// Unsigned Tarball laden
+	tarballData, err = os.ReadFile(tempFile.Name())
+	if err != nil {
+		return fmt.Errorf("failed to read unsigned tarball: %v", err)
+	}
+
+	// Signatur verifizieren
+	hash := sha256.Sum256(tarballData)
 	err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hash[:], signature)
 	if err != nil {
-		log.Warn("Package signature verification failed", map[string]interface{}{
-			"file":  file,
-			"error": err,
-		})
-		return nil
+		return fmt.Errorf("package signature verification failed: %v", err)
 	}
+
 	return nil
 }
