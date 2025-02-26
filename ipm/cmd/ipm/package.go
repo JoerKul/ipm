@@ -104,7 +104,7 @@ func signPackage(file, keyFile string) error {
 		return fmt.Errorf("failed to read package file: %v", err)
 	}
 
-	// Signatur erstellen
+	// Signatur erstellen (für den Inhalt ohne Signatur)
 	hash := sha256.Sum256(tarball)
 	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, hash[:])
 	if err != nil {
@@ -279,5 +279,8 @@ func verifyPackage(file, pubKeyFile string) error {
 		return fmt.Errorf("package signature verification failed: %v", err)
 	}
 
+	log.Info("Package signature verified", map[string]interface{}{
+		"file": file,
+	})
 	return nil
 }

@@ -112,6 +112,7 @@ var verifyCmd = &cobra.Command{
 			"pubkey": pubKeyFile,
 		})
 		if err := verifyPackage(args[0], pubKeyFile); err != nil {
+			fmt.Printf("Package verification failed: %v\n", err) // Direkte Ausgabe für Anwender
 			log.Error("Failed to verify package", err)
 			os.Exit(1)
 		}
