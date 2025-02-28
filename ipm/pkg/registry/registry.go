@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+
 	"ipm/pkg/log"
 	"ipm/pkg/types"
-	"net/http"
 
 	"github.com/Masterminds/semver/v3"
 )
@@ -147,13 +148,29 @@ func (r *NPMRegistry) ResolveVersion(name, versionRange string) (string, error) 
 	}
 
 	var pkgData struct {
-		Versions map[string]interface{} `json:"versions"`
+		Versions  map[string]interface{} `json:"versions"`
+		DistTags  map[string]string      `json:"dist-tags"` // Hinzugefügt für dist-tags
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&pkgData); err != nil {
 		log.Error("Failed to parse metadata", err, map[string]interface{}{
 			"package": name,
 		})
 		return "", fmt.Errorf("failed to parse metadata: %v", err)
+	}
+
+	// Behandle dist-tags wie "latest"
+	if versionRange == "latest" {
+		if latest, ok := pkgData.DistTags["latest"]; ok {
+			log.Debug("Resolved dist-tag 'latest'", map[string]interface{}{
+				"package": name,
+				"version": latest,
+			})
+			return latest, nil
+		}
+		log.Error("No 'latest' dist-tag found", nil, map[string]interface{}{
+			"package": name,
+		})
+		return "", fmt.Errorf("no 'latest' dist-tag found for %s", name)
 	}
 
 	constraint, err := semver.NewConstraint(versionRange)
